@@ -1,6 +1,7 @@
 # 🌟 Fractal Kaleidoscope
 
 This project combines computer vision (AI hand tracking) with advanced WebGL Shader technology, allowing you to cast dazzling visual magic in real-time through your hand movements in front of the screen.
+* **🌐 Demo:** [Click here to get started](https://xfwang2001.github.io/Fractal-Kaleidoscope/)
 
 ## 🎮 How to Play
 
@@ -10,5 +11,6 @@ This experiment uses a webcam to capture your hand keypoints in real-time. Diffe
 *   ✊ **Pinch**: Generates high-frequency fluctuations in the visual, accumulating energy and shifting overall colors.
 *   ⚡ **Burst**: Suddenly releasing from a pinched state emits a highly striking wave of energy.
 *   🔄 **Rotate**: Rotates the entire kaleidoscope fractal pattern, accompanied by color shifts.
+
 *   Built-in Debug Panel (**Press the `D` key to toggle**).
 *   The panel provides real-time visualization of data returned by the AI: FPS (Frames Per Second), currently recognized gesture status, numeric progress bars for spread/pinch/rotation angles, and the coordinates/distance of both hands on the screen.
