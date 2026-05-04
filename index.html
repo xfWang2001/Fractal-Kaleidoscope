@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>分形万花筒 Fractal Kaleidoscope — 调试面板 Debug Panel</title>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #000; }
+    #status {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-family: -apple-system, 'Helvetica Neue', sans-serif;
+      font-size: 14px;
+      z-index: 100;
+      background: rgba(0,0,0,0.7);
+      padding: 8px 24px;
+      border-radius: 20px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      transition: opacity 1s;
+      pointer-events: none;
+    }
+    #debug {
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      z-index: 200;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+      font-size: 12px;
+      line-height: 1.7;
+      background: rgba(10, 10, 18, 0.82);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 10px;
+      padding: 14px 18px;
+      min-width: 260px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      pointer-events: none;
+      user-select: none;
+    }
+    #debug .title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding-bottom: 6px;
+    }
+    #debug .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1px 0;
+    }
+    #debug .label { color: rgba(255,255,255,0.5); }
+    #debug .val { font-weight: 600; text-align: right; }
+    #debug .gesture-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+    #debug .bar-track {
+      width: 80px; height: 5px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 3px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+      margin-left: 6px;
+    }
+    #debug .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.08s;
+    }
+    .sep { height: 6px; }
+    #debug.hidden { display: none; }
+    #debug-hint {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 200;
+      color: rgba(255,255,255,0.25);
+      font-family: -apple-system, 'Helvetica Neue', sans-serif;
+      font-size: 12px;
+      pointer-events: none;
+      user-select: none;
+      transition: opacity 0.5s;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">正在加载手部识别模型... Loading hand pose model...</div>
+  <div id="debug" class="hidden">
+    <div class="title">调试面板 / DEBUG PANEL</div>
+    <div class="row"><span class="label">帧率 FPS</span><span class="val" id="d-fps">--</span></div>
+    <div class="row"><span class="label">手部数量 Hands</span><span class="val" id="d-hands">0</span></div>
+    <div class="sep"></div>
+    <div class="row"><span class="label">当前手势 Gesture</span><span class="val" id="d-gesture">--</span></div>
+    <div class="sep"></div>
+    <div class="row">
+      <span class="label">张开度 Spread</span>
+      <span class="val"><span id="d-spread-v">0.00</span>
+        <span class="bar-track"><span class="bar-fill" id="d-spread-bar" style="width:0%;background:#f8a"></span></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="label">捏合度 Pinch</span>
+      <span class="val"><span id="d-pinch-v">0.00</span>
+        <span class="bar-track"><span class="bar-fill" id="d-pinch-bar" style="width:0%;background:#8cf"></span></span>
+      </span>
+    </div>
+    <div class="row">
+      <span class="label">旋转角 Rotation</span>
+      <span class="val" id="d-rot">0.0°</span>
+    </div>
+    <div class="row">
+      <span class="label">冲击波 Burst</span>
+      <span class="val"><span id="d-burst-v">0.00</span>
+        <span class="bar-track"><span class="bar-fill" id="d-burst-bar" style="width:0%;background:#fc8"></span></span>
+      </span>
+    </div>
+    <div class="sep"></div>
+    <div class="row"><span class="label">手1位置 Hand1</span><span class="val" id="d-h1">--</span></div>
+    <div class="row"><span class="label">手2位置 Hand2</span><span class="val" id="d-h2">--</span></div>
+    <div class="row"><span class="label">双手距离 Dist</span><span class="val" id="d-dist">--</span></div>
+  </div>
+  <div id="debug-hint">按 D 键开关调试面板 / Press D to toggle debug</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://unpkg.com/ml5@1/dist/ml5.min.js"></script>
+  <script>
+const vertShader = `#ifdef GL_ES
+precision highp float;
+#endif
+attribute vec3 aPosition;
+attribute vec2 aTexCoord;
+varying vec2 vTexCoord;
+void main() {
+  vTexCoord = aTexCoord;
+  vec4 positionVec4 = vec4(aPosition, 1.0);
+  positionVec4.xy = positionVec4.xy * 2.0 - 1.0;
+  gl_Position = positionVec4;
+}`;
+
+const fragShader = `#ifdef GL_ES
+precision highp float;
+#endif
+uniform vec2  iResolution;
+uniform float iTime;
+uniform vec2  iHand1;
+uniform vec2  iHand2;
+uniform float iHandCount;
+uniform float iSpread;
+uniform float iRotation;
+uniform float iPinch;
+uniform float iBurst;
+uniform vec2 iFing1A, iFing1B, iFing1C, iFing1D, iFing1E;
+uniform vec2 iFing2A, iFing2B, iFing2C, iFing2D, iFing2E;
+varying vec2 vTexCoord;
+
+vec3 palette(float t) {
+  vec3 a = vec3(0.62, 0.55, 0.58);
+  vec3 b = vec3(0.38, 0.45, 0.42);
+  vec3 c = vec3(1.0, 1.0, 1.0);
+  vec3 d = vec3(0.00, 0.25, 0.52);
+  return a + b * cos(6.28318 * (c * t + d));
+}
+
+void main() {
+  vec2 uv = vTexCoord * 2.0 - 1.0;
+  float aspect = iResolution.x / iResolution.y;
+  uv.x *= aspect;
+
+  float h1w = smoothstep(0.2, 0.8, iHandCount);
+  float h2w = smoothstep(1.2, 1.8, iHandCount);
+
+  vec2 handOffset = iHand1 * vec2(aspect, 1.0) * h1w;
+  float handDist  = length(iHand2 - iHand1);
+  handOffset = mix(handOffset,
+                   (iHand1 + iHand2) * 0.5 * vec2(aspect, 1.0), h2w);
+
+  float speedMod  = mix(1.0, 0.3 + handDist * 3.0, h2w);
+  float colorShift = handDist * 2.0 * h2w;
+
+  float scaleMod = mix(1.5, mix(1.5, 3.5, iSpread), h1w);
+
+  scaleMod = mix(scaleMod, 1.35, iPinch * h1w);
+  float waveFreq = mix(8.0, 16.0, iPinch * h1w);
+  float expFall  = mix(1.0, 2.2,  iPinch * h1w);
+  float glowPow  = mix(1.2, 1.8,  iPinch * h1w);
+  expFall = mix(expFall, 0.55, iSpread * h1w);
+  glowPow = mix(glowPow, 0.85, iSpread * h1w);
+
+  scaleMod += iBurst * h1w * 2.0;
+  waveFreq  = mix(waveFreq, 3.5, iBurst * h1w);
+  expFall   = mix(expFall, 0.15, iBurst * h1w);
+  glowPow   = mix(glowPow, 0.7, iBurst * h1w);
+
+  colorShift += iRotation * 0.6 * h1w;
+
+  vec2 uvScreen = uv;
+
+  float rot = -iRotation * h1w;
+  float cr = cos(rot), sr = sin(rot);
+  uv = mat2(cr, -sr, sr, cr) * uv;
+
+  vec2 uv0 = uv - handOffset;
+  vec3 finalColor = vec3(0.0);
+
+  for (float i = 0.0; i < 4.0; i++) {
+    uv = fract(uv * scaleMod) - 0.5;
+    float d = length(uv) * exp(-length(uv0) * expFall);
+    vec3 col = palette(length(uv0) + i * 0.4
+                       + iTime * 0.4 * speedMod + colorShift);
+    d = sin(d * waveFreq + iTime * speedMod) / 8.0;
+    d = abs(d) / 0.4;
+    d = pow(0.01 / max(tan(d), 0.0001), glowPow);
+    finalColor += col * d;
+  }
+
+  finalColor *= h1w;
+
+  float burstPhase  = 1.0 - iBurst;
+  float shockRadius = burstPhase * 3.0;
+  float ringWidth   = 0.25 + burstPhase * 0.6;
+  float shockRing   = exp(-pow((length(uv0) - shockRadius) / ringWidth, 2.0));
+  finalColor += vec3(1.0, 0.92, 0.85) * shockRing * iBurst * h1w * 1.2;
+
+  finalColor *= 1.0 + iBurst * h1w * 1.5;
+  finalColor += vec3(1.0, 0.88, 0.82) * iBurst * iBurst * h1w * 0.25;
+
+  finalColor = mix(finalColor,
+                   finalColor * vec3(0.75, 0.88, 1.15),
+                   iPinch * h1w * 0.35);
+
+  vec3 sakura = vec3(1.0, 0.65, 0.75);
+  vec3 leaf   = vec3(0.5, 0.92, 0.55);
+  vec3 fCol1 = mix(sakura, vec3(1.0, 0.95, 0.85), iBurst * h1w * 0.7);
+  vec3 fCol2 = mix(leaf,   vec3(1.0, 0.95, 0.85), iBurst * h2w * 0.7);
+  float fSize = 0.006 + iBurst * h1w * 0.015;
+  float fBase = 0.003;
+
+  float fg;
+  fg = fSize / (pow(length(uvScreen - iFing1A*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol1 * h1w;
+  fg = fSize / (pow(length(uvScreen - iFing1B*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol1 * h1w;
+  fg = fSize / (pow(length(uvScreen - iFing1C*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol1 * h1w;
+  fg = fSize / (pow(length(uvScreen - iFing1D*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol1 * h1w;
+  fg = fSize / (pow(length(uvScreen - iFing1E*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol1 * h1w;
+
+  fg = fSize / (pow(length(uvScreen - iFing2A*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol2 * h2w;
+  fg = fSize / (pow(length(uvScreen - iFing2B*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol2 * h2w;
+  fg = fSize / (pow(length(uvScreen - iFing2C*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol2 * h2w;
+  fg = fSize / (pow(length(uvScreen - iFing2D*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol2 * h2w;
+  fg = fSize / (pow(length(uvScreen - iFing2E*vec2(aspect,1.0)),2.0)+fBase);
+  finalColor += fg * fCol2 * h2w;
+
+  float g1 = 0.02 / (length(uvScreen - iHand1*vec2(aspect,1.0)) + 0.01);
+  finalColor += g1 * vec3(1.0, 0.60, 0.72) * h1w;
+  float g2 = 0.02 / (length(uvScreen - iHand2*vec2(aspect,1.0)) + 0.01);
+  finalColor += g2 * vec3(0.50, 0.90, 0.50) * h2w;
+
+  gl_FragColor = vec4(finalColor, 1.0);
+}`;
+
+let theShader, handPose, video;
+let hands = [];
+
+let sHand1 = [0,0], sHand2 = [0,0];
+let sHandCount = 0, sSpread = 0;
+let sRotation = 0, sPinch = 0, sBurst = 0;
+let prevPinch = 0;
+let sF1 = [[0,0],[0,0],[0,0],[0,0],[0,0]];
+let sF2 = [[0,0],[0,0],[0,0],[0,0],[0,0]];
+
+const TIPS = [4, 8, 12, 16, 20];
+const F1N = ['iFing1A','iFing1B','iFing1C','iFing1D','iFing1E'];
+const F2N = ['iFing2A','iFing2B','iFing2C','iFing2D','iFing2E'];
+
+let fpsHist = [], lastDebugUpdate = 0;
+
+function preload() {
+  handPose = ml5.handPose({ maxHands: 2 });
+}
+
+function setup() {
+  createCanvas(windowWidth, windowHeight, WEBGL);
+  pixelDensity(1);
+  noStroke();
+  theShader = createShader(vertShader, fragShader);
+
+  video = createCapture(VIDEO);
+  video.size(640, 480);
+  video.style('position','fixed');
+  video.style('bottom','20px');
+  video.style('right','20px');
+  video.style('width','200px');
+  video.style('height','auto');
+  video.style('border-radius','12px');
+  video.style('border','2px solid rgba(255,255,255,0.3)');
+  video.style('z-index','10');
+  video.style('transform','scaleX(-1)');
+  video.style('opacity','0.8');
+  video.style('box-shadow','0 4px 24px rgba(0,0,0,0.6)');
+
+  handPose.detectStart(video, r => { hands = r; });
+
+  const st = document.getElementById('status');
+  if (st) {
+    st.textContent = '手部识别已就绪 Hand pose ready — 张开 Open / 旋转 Rotate / 捏合释放 Pinch to Burst';
+    setTimeout(() => { st.style.opacity = '0'; }, 5000);
+  }
+}
+
+function kpNorm(kp, vw, vh) {
+  return [
+    (1.0 - kp.x / vw) * 2.0 - 1.0,
+    -((kp.y / vh) * 2.0 - 1.0)
+  ];
+}
+
+function gestSpread(h) {
+  const w = h.keypoints[0];
+  let t = 0;
+  for (const i of TIPS) {
+    const p = h.keypoints[i];
+    t += dist(w.x, w.y, p.x, p.y);
+  }
+  return constrain(t / (5 * 200), 0, 1);
+}
+
+function gestPinch(h) {
+  const thumb = h.keypoints[4], idx = h.keypoints[8];
+  const d = dist(thumb.x, thumb.y, idx.x, idx.y);
+  return constrain(1.0 - (d - 22) / 110, 0, 1);
+}
+
+function gestRotation(h) {
+  const w = h.keypoints[0], m = h.keypoints[9];
+  const dx = -(m.x - w.x);
+  const dy = w.y - m.y;
+  return Math.atan2(dx, dy);
+}
+
+let debugVisible = false;
+
+function detectGestureName() {
+  if (sHandCount < 0.3) return { name: '无手检测 No Hand', color: '#555' };
+
+  if (sBurst > 0.15)
+    return { name: '释放冲击波 Burst ⚡', color: '#f90' };
+  if (sPinch > 0.65)
+    return { name: '捏合聚能 Pinch ✊', color: '#8cf' };
+  if (sSpread > 0.6)
+    return { name: '五指张开 Open 🖐', color: '#f8a' };
+  if (Math.abs(sRotation) > 0.35)
+    return { name: '旋转手掌 Rotate 🔄', color: '#af8' };
+  if (sPinch > 0.35)
+    return { name: '半捏合 Half Pinch', color: '#9be' };
+  if (sSpread > 0.3)
+    return { name: '半张开 Half Open', color: '#fab' };
+
+  return { name: '手掌待机 Idle', color: '#aaa' };
+}
+
+function updateDebugPanel() {
+  if (!debugVisible) return;
+  const now = performance.now();
+  if (now - lastDebugUpdate < 80) return;
+  lastDebugUpdate = now;
+
+  fpsHist.push(frameRate());
+  if (fpsHist.length > 30) fpsHist.shift();
+  const avgFps = fpsHist.reduce((a, b) => a + b, 0) / fpsHist.length;
+  const fpsColor = avgFps > 50 ? '#6f8' : avgFps > 25 ? '#fd4' : '#f55';
+
+  const el = (id) => document.getElementById(id);
+
+  const fpsEl = el('d-fps');
+  fpsEl.textContent = avgFps.toFixed(1);
+  fpsEl.style.color = fpsColor;
+
+  el('d-hands').textContent = Math.round(sHandCount);
+
+  const gest = detectGestureName();
+  const gestEl = el('d-gesture');
+  gestEl.innerHTML = '<span class="gesture-tag" style="background:' +
+    gest.color + '22;color:' + gest.color + ';border:1px solid ' +
+    gest.color + '44">' + gest.name + '</span>';
+
+  el('d-spread-v').textContent = sSpread.toFixed(2);
+  el('d-spread-bar').style.width = (sSpread * 100) + '%';
+
+  el('d-pinch-v').textContent = sPinch.toFixed(2);
+  el('d-pinch-bar').style.width = (sPinch * 100) + '%';
+
+  el('d-rot').textContent = (sRotation * 180 / Math.PI).toFixed(1) + '°';
+
+  el('d-burst-v').textContent = sBurst.toFixed(2);
+  el('d-burst-bar').style.width = (sBurst * 100) + '%';
+
+  if (sHandCount > 0.3) {
+    el('d-h1').textContent =
+      '(' + sHand1[0].toFixed(2) + ', ' + sHand1[1].toFixed(2) + ')';
+  } else {
+    el('d-h1').textContent = '--';
+  }
+
+  if (sHandCount > 1.3) {
+    el('d-h2').textContent =
+      '(' + sHand2[0].toFixed(2) + ', ' + sHand2[1].toFixed(2) + ')';
+    const d = Math.sqrt(
+      Math.pow(sHand2[0]-sHand1[0], 2) + Math.pow(sHand2[1]-sHand1[1], 2)
+    );
+    el('d-dist').textContent = d.toFixed(2);
+  } else {
+    el('d-h2').textContent = '--';
+    el('d-dist').textContent = '--';
+  }
+}
+
+function draw() {
+  const tCount = min(hands.length, 2);
+  let tH1 = [0,0], tH2 = [0,0];
+  let tSp = 0, tPinch = 0, tRot = 0;
+  let tF1 = [[0,0],[0,0],[0,0],[0,0],[0,0]];
+  let tF2 = [[0,0],[0,0],[0,0],[0,0],[0,0]];
+  const vw = video.width || 640, vh = video.height || 480;
+
+  if (hands.length > 0) {
+    const h = hands[0];
+    tH1    = kpNorm(h.keypoints[9], vw, vh);
+    tSp    = gestSpread(h);
+    tPinch = gestPinch(h);
+    tRot   = gestRotation(h);
+    for (let j = 0; j < 5; j++)
+      tF1[j] = kpNorm(h.keypoints[TIPS[j]], vw, vh);
+  }
+  if (hands.length > 1) {
+    const h = hands[1];
+    tH2 = kpNorm(h.keypoints[9], vw, vh);
+    for (let j = 0; j < 5; j++)
+      tF2[j] = kpNorm(h.keypoints[TIPS[j]], vw, vh);
+  }
+
+  const sm = 0.1;
+  sHandCount = lerp(sHandCount, tCount, sm);
+  sHand1[0]  = lerp(sHand1[0], tH1[0], sm);
+  sHand1[1]  = lerp(sHand1[1], tH1[1], sm);
+  sHand2[0]  = lerp(sHand2[0], tH2[0], sm);
+  sHand2[1]  = lerp(sHand2[1], tH2[1], sm);
+  sSpread    = lerp(sSpread, tSp, sm);
+  sPinch     = lerp(sPinch, tPinch, 0.12);
+  sRotation  = lerp(sRotation, tRot, 0.08);
+
+  const pinchDrop = prevPinch - sPinch;
+  if (pinchDrop > 0.012 && prevPinch > 0.45) {
+    sBurst = min(sBurst + pinchDrop * 10.0, 1.0);
+  }
+  sBurst *= 0.935;
+  if (sBurst < 0.005) sBurst = 0;
+  prevPinch = sPinch;
+
+  for (let j = 0; j < 5; j++) {
+    sF1[j][0] = lerp(sF1[j][0], tF1[j][0], sm);
+    sF1[j][1] = lerp(sF1[j][1], tF1[j][1], sm);
+    sF2[j][0] = lerp(sF2[j][0], tF2[j][0], sm);
+    sF2[j][1] = lerp(sF2[j][1], tF2[j][1], sm);
+  }
+
+  shader(theShader);
+  theShader.setUniform('iResolution', [width, height]);
+  theShader.setUniform('iTime', millis() / 1000.0);
+  theShader.setUniform('iHand1', sHand1);
+  theShader.setUniform('iHand2', sHand2);
+  theShader.setUniform('iHandCount', sHandCount);
+  theShader.setUniform('iSpread', sSpread);
+  theShader.setUniform('iRotation', sRotation);
+  theShader.setUniform('iPinch', sPinch);
+  theShader.setUniform('iBurst', sBurst);
+
+  for (let j = 0; j < 5; j++) {
+    theShader.setUniform(F1N[j], sF1[j]);
+    theShader.setUniform(F2N[j], sF2[j]);
+  }
+
+  rect(-width / 2, -height / 2, width, height);
+
+  updateDebugPanel();
+}
+
+function keyPressed() {
+  if (key === 'd' || key === 'D') {
+    debugVisible = !debugVisible;
+    document.getElementById('debug').classList.toggle('hidden', !debugVisible);
+    const hint = document.getElementById('debug-hint');
+    if (hint) hint.style.opacity = debugVisible ? '0' : '1';
+  }
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+}
+  </script>
+</body>
+</html>
